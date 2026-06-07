@@ -4,11 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=scanner
-Group=scanner
-WorkingDirectory=/opt/scannerserver
-Environment="SCAN_DIR=/srv/scans"
-ExecStart=/opt/scannerserver/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080
+User=danielfranzen
+WorkingDirectory=/home/danielfranzen/dev/scannerserver
+Environment="SCAN_DIR=/home/danielfranzen/scans"
+ExecStart=/home/danielfranzen/dev/scannerserver/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
