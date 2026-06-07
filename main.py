@@ -187,7 +187,30 @@ async def scan_gray_pdf():
 @app.post("/scan/bw-pdf")
 async def scan_bw_pdf():
     try:
-        path = scan_pdf("Lineart")
+        ts = timestamp()
+        tmp_gray = SCAN_DIR / f"{ts}_scan.png"
+        tmp_bw = SCAN_DIR / f"{ts}_scan_bw.png"
+
+        # Scan in gray
+        cmd = [
+            "scanimage", "--format=png", "--resolution=300",
+            "--mode=Gray", f"--output-file={tmp_gray}",
+        ]
+        log.info("Running: %s", " ".join(cmd))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "scanimage failed")
+
+        # Threshold to pure B&W with ImageMagick
+        result = subprocess.run(
+            ["convert", str(tmp_gray), "-threshold", "50%", str(tmp_bw)],
+            capture_output=True, text=True, timeout=60,
+        )
+        tmp_gray.unlink(missing_ok=True)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "convert (threshold) failed")
+
+        path = png_to_pdf(tmp_bw)
         return {"filename": path.name}
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
