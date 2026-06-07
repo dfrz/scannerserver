@@ -121,6 +121,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <div class="buttons">
   <button onclick="scan('color-pdf')">Scan Color PDF</button>
   <button onclick="scan('gray-pdf')">Scan Gray PDF</button>
+  <button onclick="scan('bw-pdf')">Scan B&amp;W PDF</button>
   <button onclick="scan('png')">Scan PNG Test</button>
 </div>
 <div id="status"></div>
@@ -178,6 +179,15 @@ async def scan_color_pdf():
 async def scan_gray_pdf():
     try:
         path = scan_pdf("Gray")
+        return {"filename": path.name}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/scan/bw-pdf")
+async def scan_bw_pdf():
+    try:
+        path = scan_pdf("Lineart")
         return {"filename": path.name}
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
