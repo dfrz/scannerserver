@@ -10,10 +10,10 @@ SERVICE_USER=scanner
 echo "==> Installerar systempaket..."
 apt-get update -qq
 apt-get install -y --no-install-recommends \
-    sane sane-utils \
+    sane-utils \
     python3 python3-venv python3-pip \
     img2pdf \
-    libsane libusb-1.0-0
+    libsane1 libusb-1.0-0
 
 echo "==> Skapar användare '$SERVICE_USER'..."
 if ! id "$SERVICE_USER" &>/dev/null; then
