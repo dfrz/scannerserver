@@ -12,7 +12,7 @@ apt-get update -qq
 apt-get install -y --no-install-recommends \
     sane-utils \
     python3 python3-venv python3-pip \
-    img2pdf \
+    img2pdf qpdf \
     libsane1 libusb-1.0-0
 
 echo "==> Skapar användare '$SERVICE_USER'..."

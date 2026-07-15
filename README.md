@@ -6,7 +6,7 @@ Enkelt webbgränssnitt för att skanna med Canon LiDE via SANE på Debian.
 
 ```bash
 # Installera beroenden (en gång)
-sudo apt-get install sane sane-utils img2pdf python3-venv
+sudo apt-get install sane sane-utils img2pdf qpdf python3-venv
 
 # Skapa virtualenv
 python3 -m venv venv
@@ -36,7 +36,7 @@ sudo bash install.sh
 ```
 
 Installationsskriptet:
-- Installerar systempaket (sane, img2pdf, python3)
+- Installerar systempaket (sane, img2pdf, qpdf, python3)
 - Skapar systemanvändaren `scanner`
 - Kopierar appen till `/opt/scannerserver`
 - Skapar virtualenv och installerar Python-paket

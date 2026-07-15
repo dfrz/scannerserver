@@ -66,7 +66,34 @@ def png_to_pdf(png_path: Path) -> Path:
     return pdf_path
 
 
-def scan_pdf(color_mode: str) -> Path:
+def last_pdf(exclude: Path | None = None) -> Path | None:
+    pdfs = [p for p in SCAN_DIR.glob("*.pdf") if p != exclude]
+    if not pdfs:
+        return None
+    return max(pdfs, key=lambda p: p.name)
+
+
+def merge_into_last(new_pdf: Path) -> Path:
+    """Append new_pdf's page(s) onto the most recently scanned PDF, if any."""
+    existing = last_pdf(exclude=new_pdf)
+    if existing is None:
+        return new_pdf
+    merged = SCAN_DIR / f"{timestamp()}_scan.pdf"
+    cmd = ["qpdf", "--empty", "--pages", str(existing), str(new_pdf), "--", str(merged)]
+    log.info("Running: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        raise RuntimeError("qpdf saknas – installera med: apt-get install qpdf")
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "qpdf failed")
+    existing.unlink(missing_ok=True)
+    new_pdf.unlink(missing_ok=True)
+    log.info("Merged into: %s", merged)
+    return merged
+
+
+def scan_pdf(color_mode: str, append: bool = False) -> Path:
     ts = timestamp()
     tmp_png = SCAN_DIR / f"{ts}_scan.png"
     cmd = [
@@ -82,12 +109,34 @@ def scan_pdf(color_mode: str) -> Path:
         msg = result.stderr.strip() or "scanimage failed"
         log.error("scanimage error: %s", msg)
         raise RuntimeError(msg)
-    return png_to_pdf(tmp_png)
+    pdf_path = png_to_pdf(tmp_png)
+    if append:
+        pdf_path = merge_into_last(pdf_path)
+    return pdf_path
 
 
-def list_scans() -> list[str]:
+def pdf_page_count(path: Path) -> int | None:
+    try:
+        result = subprocess.run(
+            ["qpdf", "--show-npages", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def list_scans() -> list[dict]:
     files = sorted(SCAN_DIR.iterdir(), reverse=True)
-    return [f.name for f in files if f.suffix in {".pdf", ".png"}]
+    return [
+        {"name": f.name, "pages": pdf_page_count(f) if f.suffix == ".pdf" else None}
+        for f in files if f.suffix in {".pdf", ".png"}
+    ]
 
 
 # ── HTML UI ──────────────────────────────────────────────────────────────────
@@ -108,6 +157,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   }}
   button:hover {{ background: #1d4ed8; }}
   button:disabled {{ background: #93c5fd; cursor: not-allowed; }}
+  button.append {{ background: #16a34a; }}
+  button.append:hover {{ background: #15803d; }}
+  button.append:disabled {{ background: #86efac; }}
   #status {{ min-height: 1.5rem; margin-bottom: 1rem; color: #16a34a; font-weight: 500; }}
   #status.error {{ color: #dc2626; }}
   table {{ width: 100%; border-collapse: collapse; }}
@@ -124,21 +176,29 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <button onclick="scan('bw-pdf')">Scan B&amp;W PDF</button>
   <button onclick="scan('png')">Scan PNG Test</button>
 </div>
+<div class="buttons">
+  <button class="append" onclick="scan('color-pdf', true)">+ Lägg till sida (Färg)</button>
+  <button class="append" onclick="scan('gray-pdf', true)">+ Lägg till sida (Gråskala)</button>
+  <button class="append" onclick="scan('bw-pdf', true)">+ Lägg till sida (S/V)</button>
+</div>
 <div id="status"></div>
 <table>
-  <thead><tr><th>Fil</th><th>Ladda ned</th></tr></thead>
+  <thead><tr><th>Fil</th><th>Sidor</th><th>Ladda ned</th></tr></thead>
   <tbody>
 {rows}
   </tbody>
 </table>
 <script>
-async function scan(type) {{
+async function scan(type, append) {{
   const status = document.getElementById('status');
   status.className = '';
-  status.textContent = 'Skannar… (detta kan ta 10–60 sekunder)';
+  status.textContent = append
+    ? 'Skannar och lägger till sida… (detta kan ta 10–60 sekunder)'
+    : 'Skannar… (detta kan ta 10–60 sekunder)';
   document.querySelectorAll('button').forEach(b => b.disabled = true);
   try {{
-    const r = await fetch('/scan/' + type, {{ method: 'POST' }});
+    const url = '/scan/' + type + (append ? '?append=true' : '');
+    const r = await fetch(url, {{ method: 'POST' }});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Okänt fel');
     status.textContent = 'Klar: ' + data.filename;
@@ -158,8 +218,9 @@ async function scan(type) {{
 async def index():
     scans = list_scans()
     rows = "\n".join(
-        f'    <tr><td>{name}</td><td><a href="/download/{name}">Ladda ned</a></td></tr>'
-        for name in scans
+        f'    <tr><td>{s["name"]}</td><td>{s["pages"] if s["pages"] is not None else "–"}</td>'
+        f'<td><a href="/download/{s["name"]}">Ladda ned</a></td></tr>'
+        for s in scans
     )
     return HTML_TEMPLATE.format(rows=rows)
 
@@ -167,25 +228,25 @@ async def index():
 # ── Scan endpoints ────────────────────────────────────────────────────────────
 
 @app.post("/scan/color-pdf")
-async def scan_color_pdf():
+async def scan_color_pdf(append: bool = False):
     try:
-        path = scan_pdf("Color")
+        path = scan_pdf("Color", append=append)
         return {"filename": path.name}
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
 
 @app.post("/scan/gray-pdf")
-async def scan_gray_pdf():
+async def scan_gray_pdf(append: bool = False):
     try:
-        path = scan_pdf("Gray")
+        path = scan_pdf("Gray", append=append)
         return {"filename": path.name}
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
 
 @app.post("/scan/bw-pdf")
-async def scan_bw_pdf():
+async def scan_bw_pdf(append: bool = False):
     try:
         ts = timestamp()
         tmp_gray = SCAN_DIR / f"{ts}_scan.png"
@@ -211,6 +272,8 @@ async def scan_bw_pdf():
             raise RuntimeError(result.stderr.strip() or "convert (threshold) failed")
 
         path = png_to_pdf(tmp_bw)
+        if append:
+            path = merge_into_last(path)
         return {"filename": path.name}
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
